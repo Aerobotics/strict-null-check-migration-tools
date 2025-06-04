@@ -9,7 +9,7 @@ runFindCycles()
 
 async function runFindCycles() {
   let files = await forEachFileInSrc(srcRoot)
-  let cycles = findCycles(srcRoot, files)
+  let cycles = findCycles(srcRoot, files, tsconfigPath)
 
   const singleFiles = []
   let stronglyConnectedComponentCount = 0

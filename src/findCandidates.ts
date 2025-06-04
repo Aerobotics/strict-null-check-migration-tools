@@ -1,19 +1,28 @@
 import * as path from 'path'
 import { listStrictNullCheckEligibleFiles, forEachFileInSrc, getCheckedFiles, listStrictNullCheckEligibleCycles } from './getStrictNullCheckEligibleFiles'
-import { getImportsForFile } from './tsHelper'
+import {getImportsForFile} from './tsHelper'
+import {isPrintHelp} from "../cli";
 
-const tsconfigPath = process.argv[2]
-console.log(tsconfigPath)
-const srcRoot = path.dirname(tsconfigPath)
+const tsConfigPath = process.argv[2]
+const tsConfigAltPath = process.argv[3] || tsConfigPath;
+const srcRoot = path.dirname(tsConfigPath)
 
 let printDependedOnCount = true
 
-findCandidates()
+await findCandidates()
+
+if (isPrintHelp() || !tsConfigPath) {
+  console.log('Usage: npm run find-candidates -- <your_project_path>/tsconfig.strictNullChecks.json [<your_project_path>/tsconfig.json]')
+  console.log(`Optionally specify an alternate tsconfig.json file to use to get better functionality I'll document later.`)
+  process.exit(0);
+}
+
+console.log('Reading tsconfig.json at', tsConfigPath)
 
 async function findCandidates() {
-  const checkedFiles = await getCheckedFiles(tsconfigPath, srcRoot)
-  const eligibleFiles = await listStrictNullCheckEligibleFiles(srcRoot, checkedFiles)
-  const eligibleCycles = await listStrictNullCheckEligibleCycles(srcRoot, checkedFiles)
+  const checkedFiles = await getCheckedFiles(tsConfigPath, srcRoot)
+  const eligibleFiles = await listStrictNullCheckEligibleFiles(srcRoot, checkedFiles, tsConfigAltPath)
+  const eligibleCycles = await listStrictNullCheckEligibleCycles(srcRoot, checkedFiles, tsConfigAltPath)
 
   if (eligibleCycles.length > 0) {
     console.log("The following cycles are eligible for enabling strictNullChecks!")
@@ -25,15 +34,19 @@ async function findCandidates() {
     }
   }
 
+  // Use TypeScript compiler API to build accurate import map
+  // console.log("Building import map using TypeScript compiler API...")
+  // const fileToImports = buildImportMapWithCompilerAPI(tsConfigPath)
   const fileToImports = new Map<string, string[]>();
   for (const file of await forEachFileInSrc(srcRoot)) {
-    fileToImports.set(file, getImportsForFile(file, srcRoot))
+    fileToImports.set(file, getImportsForFile(file, srcRoot, tsConfigPath))
   }
 
   const fileToImportsSecondOrder = oneLevelDownImports(fileToImports)
   const fileToImportsThirdOrder = oneLevelDownImports(fileToImportsSecondOrder)
 
   const dependedOnCount = countImporters(eligibleFiles, fileToImports)
+  console.dir(dependedOnCount);
   const dependedOnCountThirdOrder = countImporters(eligibleFiles, fileToImportsThirdOrder)
 
   let fileDependencyCountArray = Array.from(dependedOnCountThirdOrder.entries())
@@ -45,7 +58,7 @@ async function findCandidates() {
     }
   })
 
-  console.log("Here at the list of files eligible for enabling strictNullChecks!")
+  console.log("Here is the list of files eligible for enabling strictNullChecks!")
   console.log("These files only depend on other files for which strictNullCheck has already been enabled.")
   if (printDependedOnCount) {
     console.log("The dependency count is approximate (this script only resolves up to third order imports).")

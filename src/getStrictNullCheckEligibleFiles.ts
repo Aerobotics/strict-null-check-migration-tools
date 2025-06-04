@@ -1,16 +1,16 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import * as glob from 'glob'
+import { glob } from 'glob'
 import { ImportTracker } from './tsHelper'
 import { findCycles } from './findCycles'
 
 function considerFile(file: string): boolean {
   return (file.endsWith('.ts') || file.endsWith('.tsx')) &&
-         !file.endsWith('.stories.tsx')
+         !file.endsWith('.stories.tsx') && !file.includes('/node_modules/')
 }
 
-function hasUncheckedImport(file: string, importsTracker: ImportTracker, checkedFiles: Set<string>): boolean {
-  const imports = importsTracker.getImports(file)
+function hasUncheckedImport(file: string, importsTracker: ImportTracker, checkedFiles: Set<string>, tsconfigPath: string): boolean {
+  const imports = importsTracker.getImports(file, tsconfigPath)
   for (const imp of imports) {
     if (!checkedFiles.has(imp)) {
       return true
@@ -19,16 +19,10 @@ function hasUncheckedImport(file: string, importsTracker: ImportTracker, checked
   return false
 }
 
-export function forEachFileInSrc(srcRoot: string): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    glob(`${srcRoot}/**/*.ts?(x)`, (err, files) => {
-      if (err) {
-        return reject(err)
-      }
+export async function forEachFileInSrc(srcRoot: string): Promise<string[]> {
+  const files = await glob(`${srcRoot}/**/*.ts?(x)`, { ignore: ['**/node_modules/**'] });
 
-      return resolve(files.filter(considerFile))
-    })
-  })
+  return files.filter(considerFile);
 }
 
 /**
@@ -37,7 +31,9 @@ export function forEachFileInSrc(srcRoot: string): Promise<string[]> {
  */
 export async function listStrictNullCheckEligibleFiles(
   srcRoot: string,
-  checkedFiles: Set<string>): Promise<string[]> {
+  checkedFiles: Set<string>,
+  tsConfigPath: string,
+): Promise<string[]> {
 
   const importsTracker = new ImportTracker(srcRoot)
 
@@ -46,7 +42,7 @@ export async function listStrictNullCheckEligibleFiles(
     if (checkedFiles.has(file)) {
       return false
     }
-    return !hasUncheckedImport(file, importsTracker, checkedFiles)
+    return !hasUncheckedImport(file, importsTracker, checkedFiles, tsConfigPath)
   })
 }
 
@@ -56,12 +52,14 @@ export async function listStrictNullCheckEligibleFiles(
  */
 export async function listStrictNullCheckEligibleCycles(
   srcRoot: string,
-  checkedFiles: Set<string>): Promise<string[][]> {
+  checkedFiles: Set<string>,
+  tsconfigPath: string
+): Promise<string[][]> {
 
   const importsTracker = new ImportTracker(srcRoot)
 
   const files = await forEachFileInSrc(srcRoot)
-  const cycles = findCycles(srcRoot, files)
+  const cycles = findCycles(srcRoot, files, tsconfigPath)
   return cycles.filter(filesInCycle => {
     // A single file is not a cycle
     if (filesInCycle.length <= 1) {
@@ -84,7 +82,7 @@ export async function listStrictNullCheckEligibleCycles(
     // All imports of all files in the cycle must have
     // been whitelisted for the cycle to be eligible
     for (const file of files) {
-      if (hasUncheckedImport(file, importsTracker, checkedFiles)) {
+      if (hasUncheckedImport(file, importsTracker, checkedFiles, tsconfigPath)) {
         return false
       }
     }
@@ -107,36 +105,22 @@ export async function getCheckedFiles(tsconfigPath: string, srcRoot: string): Pr
 
   const set = new Set<string>();
 
-  await Promise.all(tsconfig.include.map(file => {
-    return new Promise((resolve, reject) => {
-      glob(path.join(srcRoot, file), (err, files) => {
-        if (err) {
-          return reject(err)
-        }
+  await Promise.all(tsconfig.include.map<void>(async (file) => {
+    const files = await glob(path.join(srcRoot, file))
+    for (const file of files) {
+      if (considerFile(file)) {
+        set.add(file)
+      }
+    }
 
-        for (const file of files) {
-          if (considerFile(file)) {
-            set.add(file)
-          }
-        }
-        resolve()
-      })
-    });
+    return;
   }));
 
-  await Promise.all(tsconfig.exclude.map(file => {
-    return new Promise((resolve, reject) => {
-      glob(path.join(srcRoot, file), (err, files) => {
-        if (err) {
-          return reject(err)
-        }
-
-        for (const file of files) {
-          set.delete(file)
-        }
-        resolve()
-      })
-    });
+  await Promise.all(tsconfig.exclude.map<void>(async (file) => {
+    const files = await glob(path.join(srcRoot, file))
+    for (const file of files) {
+      set.delete(file)
+    }
   }));
 
   (tsconfig.files || []).forEach(include => {

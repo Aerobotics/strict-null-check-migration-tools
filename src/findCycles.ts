@@ -6,7 +6,7 @@ import { getImportsForFile } from './tsHelper'
 // https://en.wikipedia.org/wiki/Kosaraju%27s_algorithm
 //
 // Return a list of (list of files in a cycle, which may be just one file).
-export function findCycles(srcRoot: string, files: string[]): string[][] {
+export function findCycles(srcRoot: string, files: string[], tsconfigPath: string): string[][] {
   const imports = new Map<string, Array<string>>()
   const importers = new Map<string, Set<string>>()
 
@@ -15,7 +15,7 @@ export function findCycles(srcRoot: string, files: string[]): string[][] {
   // Step 1: do a post-order traversal of the dependency tree
   const visit = (file: string) => {
     if (!imports.has(file)) {
-      const importList = getImportsForFile(file, srcRoot)
+      const importList = getImportsForFile(file, srcRoot, tsconfigPath)
       imports.set(file, importList)
 
       // Recursively traverse imports
@@ -47,6 +47,10 @@ export function findCycles(srcRoot: string, files: string[]): string[][] {
   // This groups files into strongly connected-components using information
   // obtained in step 1.
   const assign = (file: string, root: string) => {
+    if (file.includes('/node_modules/')) {
+      return
+    }
+
     if (!fileToRoot.has(file)) {
       fileToRoot.set(file, root)
 

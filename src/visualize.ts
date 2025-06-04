@@ -4,12 +4,20 @@ import { listStrictNullCheckEligibleFiles, getCheckedFiles, forEachFileInSrc, li
 import { ImportTracker } from './tsHelper'
 import { findCycles } from './findCycles'
 import { ErrorCounter } from './errorCounter'
+import {isPrintHelp} from "../cli";
 
 const tsconfigPath = process.argv[2]
+const tsConfigAltPath = process.argv[3] || tsconfigPath;
 const srcRoot = path.dirname(tsconfigPath)
 const countErrors = process.argv.indexOf('--countErrors') >= 0
 
-summary()
+await summary()
+
+if (isPrintHelp() || !tsconfigPath) {
+  console.log('Usage: npm run visualize -- <your_project_path>/tsconfig.strictNullChecks.json [<your_project_path>/tsconfig.json]')
+  console.log(`Optionally specify an alternate tsconfig.json file to use to get better functionality I'll document later.`)
+  process.exit(0);
+}
 
 export interface DependencyNode {
   id: number
@@ -37,12 +45,12 @@ async function summary() {
   const allFiles = await forEachFileInSrc(srcRoot)
   const checkedFiles = await getCheckedFiles(tsconfigPath, srcRoot)
   const eligibleFiles = new Set([
-    ...await listStrictNullCheckEligibleFiles(srcRoot, checkedFiles),
-    ...(await listStrictNullCheckEligibleCycles(srcRoot, checkedFiles)).reduce((a, b) => a.concat(b), [])
+    ...await listStrictNullCheckEligibleFiles(srcRoot, checkedFiles, tsConfigAltPath),
+    ...(await listStrictNullCheckEligibleCycles(srcRoot, checkedFiles, tsconfigPath)).reduce((a, b) => a.concat(b), [])
   ])
   const importTracker = new ImportTracker(srcRoot)
 
-  let errorCounter = new ErrorCounter(tsconfigPath)
+  let errorCounter = new ErrorCounter(tsConfigAltPath)
   if (countErrors) {
     errorCounter.start()
   }
@@ -50,7 +58,7 @@ async function summary() {
   console.log(`Current strict null checking progress ${checkedFiles.size}/${allFiles.length}`)
   console.log(`Current eligible file count: ${eligibleFiles.size}`)
 
-  const cycles = findCycles(srcRoot, allFiles)
+  const cycles = findCycles(srcRoot, allFiles, tsconfigPath)
   let nodes: DependencyNode[] = []
   for (let i = 0; i < cycles.length; i++) {
     let files = cycles[i]
@@ -127,12 +135,15 @@ function makeDependenciesLists(
 
   for (const node of nodes) {
     for (const file of node.files) {
-      for (const dependency of importTracker.getImports(file)) {
+      for (const dependency of importTracker.getImports(file, tsconfigPath)) {
         // Ignore dependencies that are already part of the current cycle
         if (node.files.indexOf(dependency) >= 0) {
           continue
         }
-        let id = fileToNodeMap.get(dependency).id
+        let id = fileToNodeMap.get(dependency)?.id
+        if (!id) {
+          continue
+        }
         // Avoid duplicates
         if (node.dependencies.indexOf(id) >= 0) {
           continue
@@ -150,12 +161,15 @@ function makeDependentsLists(
 
   for (const node of nodes) {
     for (const file of node.files) {
-      for (const dependency of importTracker.getImports(file)) {
+      for (const dependency of importTracker.getImports(file, tsconfigPath)) {
         // Ignore dependencies that are already part of the current cycle
         if (node.files.indexOf(dependency) >= 0) {
           continue
         }
         let dependencyNode = fileToNodeMap.get(dependency)
+        if  (!dependencyNode) {
+          continue
+        }
         // Avoid duplicates
         if (dependencyNode.dependents.indexOf(node.id) < 0) {
           dependencyNode.dependents.push(node.id)

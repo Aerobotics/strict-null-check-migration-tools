@@ -3,6 +3,7 @@ import * as path from 'path'
 import { glob } from 'glob'
 import { ImportTracker } from './tsHelper'
 import { findCycles } from './findCycles'
+import * as ts from "typescript";
 
 function considerFile(file: string): boolean {
   return (file.endsWith('.ts') || file.endsWith('.tsx')) &&
@@ -101,7 +102,13 @@ interface TSConfig {
  * --strictNullChecks.
  */
 export async function getCheckedFiles(tsconfigPath: string, srcRoot: string): Promise<Set<string>> {
-  const tsconfig = JSON.parse(fs.readFileSync(tsconfigPath).toString()) as TSConfig
+  const configPath = path.resolve(tsconfigPath);
+  const { config } = ts.readConfigFile(configPath, ts.sys.readFile);
+  const tsconfig = ts.parseJsonConfigFileContent(
+    config,
+    ts.sys,
+    path.dirname(configPath)
+  ).raw as TSConfig;
 
   const set = new Set<string>();
 

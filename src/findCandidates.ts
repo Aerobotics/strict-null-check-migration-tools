@@ -17,8 +17,6 @@ if (isPrintHelp() || !tsConfigPath) {
   process.exit(0);
 }
 
-console.log('Reading tsconfig.json at', tsConfigPath)
-
 async function findCandidates() {
   const checkedFiles = await getCheckedFiles(tsConfigPath, srcRoot)
   const eligibleFiles = await listStrictNullCheckEligibleFiles(srcRoot, checkedFiles, tsConfigAltPath)

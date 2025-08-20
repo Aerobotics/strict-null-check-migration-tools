@@ -1,8 +1,9 @@
 import * as fs from 'fs'
-import * as path from 'path'
 import { listStrictNullCheckEligibleFiles, getCheckedFiles } from './getStrictNullCheckEligibleFiles'
 import { ErrorCounter } from './errorCounter'
 import {isPrintHelp} from "../cli";
+import * as ts from 'typescript';
+import * as path from 'path'
 
 const tsConfigPath = process.argv[2]
 const tsConfigAltPath = process.argv[3] || tsConfigPath;
@@ -61,13 +62,19 @@ async function tryAutoAddStrictNulls() {
 }
 
 function addFileToConfig(relativeFilePath: string) {
-  const config = JSON.parse(fs.readFileSync(tsConfigPath).toString())
-  const path = `./${relativeFilePath}`
-  const excludeIndex = config.exclude.indexOf(path)
+  const configPath = path.resolve(tsConfigPath);
+  const { config } = ts.readConfigFile(configPath, ts.sys.readFile);
+  const tsconfig = ts.parseJsonConfigFileContent(
+    config,
+    ts.sys,
+    path.dirname(configPath)
+  ).raw;
+  const _path = `./${relativeFilePath}`
+  const excludeIndex = tsconfig.exclude.indexOf(_path)
   if (excludeIndex >= 0) {
-    config.exclude.splice(excludeIndex, 1)
+    tsconfig.exclude.splice(excludeIndex, 1)
   } else {
-    config.files = Array.from(new Set((config.files ?? []).concat(`./${relativeFilePath}`).sort()))
+    tsconfig.files = Array.from(new Set((tsconfig.files ?? []).concat(`./${relativeFilePath}`).sort()))
   }
-  fs.writeFileSync(tsConfigPath, JSON.stringify(config, null, 2))
+  fs.writeFileSync(tsConfigPath, JSON.stringify(tsconfig, null, 2))
 }
